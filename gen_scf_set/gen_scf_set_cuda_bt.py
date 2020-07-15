@@ -50,16 +50,16 @@ def scd_fam(x, Np, L, N=None):   #  x = 1024 Np = 256 L = 1
             i = (k+l) // 2
             a = int(((k-l)/float(Np) + 1.) * N)
             Sx[:,i,a-Mp:a+Mp] = XF2[:,(P//2-Mp):(P//2+Mp)]
-    return Sx   # shape (alpha, f_k)
+    return Sx   # shape (batch, alpha, f_k)
 
 # return alpha profile of the SCD matrix
 
 def scf_per_batch(Np, L, xs):  # xs shape (bs,1024,2)
     B = Np//2
-    s = scd_fam(xs, Np, L)
+    s = scd_fam(xs, Np, L)  # shape (batch, alpha, f_k)
     f = cp.absolute(s)
     alpha = cp.amax(cp.absolute(s), axis=-1)
-    freq = cp.amax(cp.absolute(s), axis=-2)  
+    freq = cp.amax(cp.absolute(s), axis=-2)
     (bs, my, mx) = f.shape 
     freq = freq[:, (mx//2-B):(mx//2 + B)]
 
