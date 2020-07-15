@@ -6,7 +6,7 @@ import math
 from cupy.lib.stride_tricks import as_strided
 import cupy
 import cupy as cp
-
+import time
 
 def scd_fam(x, Np, L, N=None):   #  x = 1024 Np = 256 L = 1
     def sliding_window(x, w, s):
@@ -17,11 +17,9 @@ def scd_fam(x, Np, L, N=None):   #  x = 1024 Np = 256 L = 1
     # input channelization
     bs = x.shape[0]
     xs = sliding_window(x, Np, L)
-    
     Pe = int(cp.floor(int(cp.log(xs.shape[1])/cp.log(2))))
     P = 2**Pe
     N = L*P
-
     xs2 = xs[:,0:P,:]
     # windowing
     w = cp.hamming(Np)
@@ -46,7 +44,7 @@ def scd_fam(x, Np, L, N=None):   #  x = 1024 Np = 256 L = 1
     for k in range(Np):
         for l in range(Np):
             XF2 = cp.fft.fft(XD[:,:,k]*cp.conj(XD[:,:,l]), axis=-1)
-            XF2 = cp.fft.fftshift(XF2, axis=-1)
+            XF2 = cp.fft.fftshift(XF2, axes=-1)
             XF2 /= P
 
             i = (k+l) // 2
@@ -55,40 +53,44 @@ def scd_fam(x, Np, L, N=None):   #  x = 1024 Np = 256 L = 1
     return Sx   # shape (alpha, f_k)
 
 # return alpha profile of the SCD matrix
-def alphaprofile(s):
-    return cp.amax(cp.absolute(s), axis=-1)
 
-def freqprofile(s):
-    return cp.amax(cp.absolute(s), axis=-2)    
-
-def scf_per_signal(Np, L, xs):  # xs shape (1024,2)
+def scf_per_batch(Np, L, xs):  # xs shape (bs,1024,2)
     B = Np//2
     s = scd_fam(xs, Np, L)
     f = cp.absolute(s)
-    alpha = alphaprofile(s)
-    freq = freqprofile(s)
+    alpha = cp.amax(cp.absolute(s), axis=-1)
+    freq = cp.amax(cp.absolute(s), axis=-2)  
     (bs, my, mx) = f.shape 
     freq = freq[:, (mx//2-B):(mx//2 + B)]
-    print ('done')
-    return alpha, freq   # should be (256,2)
+
+    return alpha, freq   # should be (bs,Np) (bs,Np)
 
 
 # transform train set
 Np = 256
 L = 1
+bss = 1024
 # path to the dataset.
 x = h5py.File('../../dataset/201801a_data_train.h5', 'r+')
 xx = x['train']
+set_size = xx.shape[0]
+cnt = int(set_size/bss)
 data_train = []
 
-s = xx[:256,:,0] + 1j * xx[:256,:,1]
-s = cp.array(s)
-oo, o = scf_per_signal(Np, L, s)
-'''
-data_train.append(oo)
-print (oo.shape)
+for ii in range(cnt):
+    s = xx[ii*bss:(ii+1)*bss,:,0] + 1j * xx[ii*bss:(ii+1)*bss,:,1]
+    s = cp.array(s)
+    
+    alpha, freq = scf_per_batch(Np, L, s)  #(bs,Np) (bs,Np)
+    # should be (bs,Np,2)
+    x_gpu = cp.concatenate((alpha, freq), axis=1).reshape((bss,2,Np))
+    x_cpu = cp.asnumpy(x_gpu)
+    x_ = np.transpose(x_cpu,(0,2,1))
+    print (x_.shape)
+    data_train.append(x_)
 
-hf = h5py.File('201801a_scf_256.h5', 'w')
-hf.create_dataset('train_scf', data=data_train)
+data = np.asarray(data_train).reshape(set_size,Np,2)
+hf = h5py.File('201801a_scf_256_train.h5', 'w')
+hf.create_dataset('train_scf', data=data)
 hf.close()
-'''
+
